@@ -29,14 +29,14 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010208);
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
 camera.position.set(0, 60, 120);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 0.01;
-controls.maxDistance = 1200;
+controls.maxDistance = 3000;
 
 // ---------- Lighting ----------
 // The Sun is the ONLY light source. No ambient light — the night side of every
@@ -320,10 +320,26 @@ select.addEventListener('change', () => setView(select.value));
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const infoEl = document.getElementById('info');
+let pointerDownPos = null;
 
-renderer.domElement.addEventListener('click', (e) => {
-  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+// Track pointer-down so we can distinguish a tap from a drag (mobile).
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  pointerDownPos = { x: e.clientX, y: e.clientY };
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  // Only treat as a tap if the pointer barely moved (not a drag/orbit).
+  if (pointerDownPos) {
+    const dx = e.clientX - pointerDownPos.x;
+    const dy = e.clientY - pointerDownPos.y;
+    if (dx * dx + dy * dy > 25) { pointerDownPos = null; return; } // it was a drag
+  }
+  pointerDownPos = null;
+  handleSelect(e.clientX, e.clientY);
+});
+
+function handleSelect(clientX, clientY) {
+  mouse.x = (clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
   const hits = raycaster.intersectObjects(allSelectables, true);
   if (hits.length) {
@@ -353,13 +369,26 @@ renderer.domElement.addEventListener('click', (e) => {
   } else {
     infoEl.style.display = 'none';
   }
-});
+}
 
 // ---------- Animation ----------
 let paused = false;
 let lastTime = performance.now();
 let simTime = 0; // simulated days
-const DAYS_PER_SECOND = 2.0; // human-readable speed
+let DAYS_PER_SECOND = 1.0; // human-readable speed (days of sim per real second)
+
+// Time-speed slider (logarithmic: 0.01 → 1000 days/s)
+const speedSlider = document.getElementById('speed-slider');
+const speedVal = document.getElementById('speed-val');
+function setSpeedFromSlider(v) {
+  const pct = v / 100; // 0..1
+  DAYS_PER_SECOND = Math.pow(10, -2 + pct * 5); // 0.01 .. 1000
+  speedVal.textContent = DAYS_PER_SECOND < 1
+    ? (DAYS_PER_SECOND * 24).toFixed(1) + ' hr/s'
+    : DAYS_PER_SECOND.toFixed(DAYS_PER_SECOND < 10 ? 1 : 0) + ' day/s';
+}
+speedSlider.addEventListener('input', () => setSpeedFromSlider(parseFloat(speedSlider.value)));
+setSpeedFromSlider(parseFloat(speedSlider.value));
 
 // Keplerian position on an elliptical orbit
 function keplerPos(rec, t) {
@@ -384,8 +413,11 @@ function updatePositions() {
   for (const rec of Object.values(planetMeshes)) {
     const pos = keplerPos(rec, simTime);
     rec.grp.position.copy(pos);
-    // rotate planet on its axis
-    rec.mesh.rotation.y += 0.002;
+    // Rotate on its axis at the REAL rate, tied to simTime so it scales with
+    // the time-speed slider. rotPeriod is in hours → days = rotPeriod/24.
+    // (Negative rotPeriod = retrograde rotation, e.g. Venus.)
+    const rotDays = rec.rotPeriod / 24;
+    rec.mesh.rotation.y = (2 * Math.PI * simTime) / rotDays;
     // moons orbit the planet
     for (const m of rec.moons) {
       const a = m.phase + (2 * Math.PI * simTime) / m.period;
