@@ -1,30 +1,38 @@
-# Orbital Data Traffic
+# Solar System — Full-Scale Model
 
-A jaw-dropping 3D orbital data traffic model and tracker. Realistic Earth with
-day/night terminator, night lights and cloud layer, an atmosphere glow, four
-satellite constellations (LEO / MEO / GEO / Sun-synchronous), ground stations,
-and **comet-like data packets** streaking between nodes across the network —
-all rendered in WebGL (Three.js) with high-quality bloom.
+A high-fidelity, full-scale 3D model of our solar system built with Three.js
+WebGL. Real orbital data, high-resolution planet textures, moon systems, and a
+dropdown to navigate between the full system and individual planets.
 
 **Live:** https://newstex-sparky.github.io/orbital-benchmark-qwenflash/
 
-## What it shows
+## Features
 
-- **Realistic Earth** — NASA-style 2048px day map, normal map, specular, cloud
-  layer, city night-lights, and a Fresnel atmosphere rim glow.
-- **Satellite constellations** — 23 satellites in 4 orbital shells, each with a
-  distinct color, moving at human-readable orbital speeds.
-- **Ground stations** — 6 up-link markers (Vandenberg, McMurdo, Tromsø, etc.).
-- **Comet data packets** — additive, elongated comet streaks whose tails stream
-  behind their velocity (billboarded + screen-space oriented), arcing between
-  ground stations and satellites. Paced so a human can follow each packet.
-- **Bloom post-processing** — UnrealBloomPass for the glow.
+- **Real orbital data** — J2000 mean elements (semi-major axis, eccentricity,
+  inclination, orbital period) for all 8 planets and 5 dwarf planets, from
+  NASA/JPL and Sky & Telescope.
+- **High-fidelity textures** — 2K NASA-derived planet maps (Solar System Scope,
+  CC BY 4.0) for Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, Neptune,
+  and the Moon. Saturn has its ring system.
+- **Moon systems** — Earth's Moon, Mars' Phobos & Deimos, Jupiter's 4 Galilean
+  moons, Saturn's 7 major moons, Uranus' 5 major moons, Neptune's Triton, and
+  Pluto's Charon — each orbiting its planet on real orbital periods.
+- **Dropdown navigation** — select any planet or dwarf planet to fly the camera
+  to it and see its moons; select "Full Solar System" to zoom out to the whole
+  system with orbits around the Sun.
+- **Asteroid belt** — 1,200 particles between Mars and Jupiter.
+- **Bloom post-processing** — UnrealBloomPass for the Sun's glow and planet
+  halos.
+- **Keplerian orbits** — planets follow real elliptical orbits (solved via
+  Kepler's equation), not simple circles.
 
 ## Controls
 
+- **Dropdown (top-right)** — navigate between the full system and individual
+  planets/dwarf planets
 - **Drag** — orbit the camera
 - **Scroll** — zoom
-- **Click a node** — satellite / ground-station details panel
+- **Click a body** — planet / moon / dwarf-planet details panel
 - **Space** — pause/resume the simulation
 
 ## Run locally
@@ -42,3 +50,9 @@ All assets are self-hosted (no runtime CDN dependence).
 - Three.js 0.160 (self-hosted `lib/`)
 - Vanilla ES modules, no build step
 - GitHub Pages via the `gh-pages` branch
+
+## Data sources
+
+- NASA/JPL planetary factsheet (orbital elements, radii, periods)
+- Sky & Telescope "Moons of the Solar System" (moon orbital data)
+- Solar System Scope textures (CC BY 4.0, NASA-derived)
