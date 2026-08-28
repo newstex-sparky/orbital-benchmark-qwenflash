@@ -3,13 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Orbital Data Traffic — Space Data Network</title>
-<meta name="description" content="A jaw-dropping 3D orbital data traffic model and tracker. Realistic Earth, satellite constellations, and comet-like data packets streaming across the network." />
+<title>Solar System — Full-Scale Model</title>
+<meta name="description" content="A high-fidelity, full-scale 3D model of our solar system. Real orbital data, planet textures, moon systems, and a dropdown to navigate." />
 <style>
   :root {
     --accent: #5fd9ff;
-    --accent2: #8af2ff;
-    --accent3: #c9a0ff;
+    --accent2: #c9a0ff;
     --panel: rgba(8, 14, 26, 0.72);
     --panel-border: rgba(120, 200, 255, 0.18);
     --text: #d7ecff;
@@ -19,42 +18,41 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     width: 100%; height: 100%; overflow: hidden;
-    background: #020409;
+    background: #010208;
     color: var(--text);
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
   }
   #app { position: fixed; inset: 0; }
   canvas { display: block; }
 
-  /* ---------- HUD ---------- */
   .hud { position: absolute; pointer-events: none; z-index: 10; }
   .hud * { pointer-events: none; }
 
-  #title {
-    top: 22px; left: 28px;
-  }
+  #title { top: 22px; left: 28px; }
   #title h1 {
     font-size: 19px; font-weight: 600; letter-spacing: 3px;
     text-transform: uppercase; color: #eaf7ff;
     text-shadow: 0 0 24px rgba(95, 217, 255, 0.6);
   }
-  #title .sub {
-    font-size: 11px; letter-spacing: 1.5px; color: var(--muted);
-    margin-top: 4px;
-  }
+  #title .sub { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); margin-top: 4px; }
 
-  #clock {
-    top: 22px; right: 28px; text-align: right;
+  /* Dropdown */
+  #nav { top: 22px; right: 28px; pointer-events: auto; }
+  #nav select {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    padding: 9px 12px;
+    backdrop-filter: blur(8px);
+    cursor: pointer;
+    outline: none;
+    min-width: 180px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.45);
   }
-  #clock .time {
-    font-size: 26px; font-weight: 300; font-variant-numeric: tabular-nums;
-    letter-spacing: 1px; color: #eaf7ff;
-    text-shadow: 0 0 20px rgba(95, 217, 255, 0.4);
-  }
-  #clock .date {
-    font-size: 11px; color: var(--muted); letter-spacing: 1.5px;
-    text-transform: uppercase; margin-top: 2px;
-  }
+  #nav select:hover { border-color: rgba(95,217,255,0.5); }
+  #nav select option { background: #0a1220; color: var(--text); }
 
   .panel {
     background: var(--panel);
@@ -65,51 +63,33 @@
     padding: 12px 14px;
   }
 
+  #info {
+    top: 80px; left: 28px; width: 250px; display: none;
+    font-size: 11.5px; line-height: 1.7;
+  }
+  #info h3 { margin-bottom: 6px; }
+
   #legend {
-    bottom: 24px; left: 28px; width: 230px;
+    bottom: 24px; left: 28px; width: 200px;
   }
   #legend h3 {
     font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
-    color: var(--accent); margin-bottom: 9px;
-    text-shadow: var(--glow);
+    color: var(--accent); margin-bottom: 9px; text-shadow: var(--glow);
   }
-  .legend-row {
-    display: flex; align-items: center; gap: 9px;
-    font-size: 11.5px; color: var(--text); margin-bottom: 7px;
-  }
+  .legend-row { display: flex; align-items: center; gap: 9px; font-size: 11.5px; margin-bottom: 6px; }
   .legend-row:last-child { margin-bottom: 0; }
-  .swatch {
-    width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto;
-  }
-  .legend-row .lbl { flex: 1; color: var(--muted); }
-  .legend-row .val { font-variant-numeric: tabular-nums; }
-
-  #stats {
-    bottom: 24px; right: 28px; width: 240px; text-align: right;
-  }
-  #stats h3 {
-    font-size: 11px; letter-spacing: 2px; text-transform: uppercase;
-    color: var(--accent2); margin-bottom: 9px; text-shadow: var(--glow);
-  }
-  .stat-row {
-    display: flex; justify-content: space-between; gap: 12px;
-    font-size: 11.5px; margin-bottom: 7px;
-  }
-  .stat-row:last-child { margin-bottom: 0; }
-  .stat-row .k { color: var(--muted); }
-  .stat-row .v { font-variant-numeric: tabular-nums; color: #eaf7ff; }
+  .swatch { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; }
+  .legend-row .lbl { color: var(--muted); }
 
   #controls {
     bottom: 24px; left: 50%; transform: translateX(-50%);
-    text-align: center; font-size: 11px; color: var(--muted);
-    letter-spacing: 1px;
+    text-align: center; font-size: 11px; color: var(--muted); letter-spacing: 1px;
   }
   #controls b { color: var(--text); font-weight: 600; }
 
-  /* loading veil */
   #veil {
     position: fixed; inset: 0; z-index: 100;
-    background: radial-gradient(circle at 50% 40%, #060b18 0%, #020409 70%);
+    background: radial-gradient(circle at 50% 40%, #060b18 0%, #010208 70%);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     transition: opacity 0.8s ease;
   }
@@ -119,23 +99,15 @@
     color: #eaf7ff; text-shadow: 0 0 30px rgba(95,217,255,0.7);
     animation: pulse 2.2s ease-in-out infinite;
   }
-  #veil .bar {
-    margin-top: 26px; width: 240px; height: 3px; border-radius: 3px;
-    background: rgba(95,217,255,0.15); overflow: hidden;
-  }
-  #veil .bar > div {
-    height: 100%; width: 0%; border-radius: 3px;
-    background: linear-gradient(90deg, #5fd9ff, #c9a0ff);
-    transition: width 0.4s ease;
-  }
+  #veil .bar { margin-top: 26px; width: 240px; height: 3px; border-radius: 3px; background: rgba(95,217,255,0.15); overflow: hidden; }
+  #veil .bar > div { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, #5fd9ff, #c9a0ff); transition: width 0.4s ease; }
   #veil .status { margin-top: 16px; font-size: 11px; letter-spacing: 2px; color: var(--muted); }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.55} }
 
   @media (max-width: 720px) {
-    #legend { width: 180px; }
-    #stats { width: 190px; }
+    #legend { width: 160px; }
     #title h1 { font-size: 15px; }
-    #clock .time { font-size: 20px; }
+    #nav select { min-width: 140px; font-size: 12px; }
   }
 </style>
 </head>
@@ -143,38 +115,51 @@
   <div id="app"></div>
 
   <div class="hud" id="title">
-    <h1>Orbital Data Traffic</h1>
-    <div class="sub">SPACE DATA NETWORK &middot; LIVE SIMULATION</div>
+    <h1>Solar System</h1>
+    <div class="sub">FULL-SCALE MODEL &middot; REAL ORBITAL DATA</div>
   </div>
 
-  <div class="hud" id="clock">
-    <div class="time" id="time">--:--:--</div>
-    <div class="date" id="date">—</div>
+  <div class="hud" id="nav">
+    <select id="planet-select">
+      <option value="system" selected>☀ Full Solar System</option>
+      <optgroup label="Planets">
+        <option value="Mercury">Mercury</option>
+        <option value="Venus">Venus</option>
+        <option value="Earth">Earth</option>
+        <option value="Mars">Mars</option>
+        <option value="Jupiter">Jupiter</option>
+        <option value="Saturn">Saturn</option>
+        <option value="Uranus">Uranus</option>
+        <option value="Neptune">Neptune</option>
+      </optgroup>
+      <optgroup label="Dwarf Planets">
+        <option value="Ceres">Ceres</option>
+        <option value="Pluto">Pluto</option>
+        <option value="Haumea">Haumea</option>
+        <option value="Makemake">Makemake</option>
+        <option value="Eris">Eris</option>
+      </optgroup>
+    </select>
   </div>
+
+  <div class="hud panel" id="info"></div>
 
   <div class="hud panel" id="legend">
-    <h3>Network</h3>
-    <div class="legend-row"><div class="swatch" style="background:#5fd9ff;box-shadow:0 0 10px #5fd9ff"></div><div class="lbl">Active packets</div><div class="val" id="l-pkts">0</div></div>
-    <div class="legend-row"><div class="swatch" style="background:#7dffb0;box-shadow:0 0 10px #7dffb0"></div><div class="lbl">Satellites</div><div class="val" id="l-sats">0</div></div>
-    <div class="legend-row"><div class="swatch" style="background:#c9a0ff;box-shadow:0 0 10px #c9a0ff"></div><div class="lbl">Ground stations</div><div class="val" id="l-stns">0</div></div>
-  </div>
-
-  <div class="hud panel" id="stats">
-    <h3>Telemetry</h3>
-    <div class="stat-row"><span class="k">Packets in flight</span><span class="v" id="s-flight">0</span></div>
-    <div class="stat-row"><span class="k">Data delivered</span><span class="v" id="s-delivered">0</span></div>
-    <div class="stat-row"><span class="k">Throughput</span><span class="v" id="s-tput">0 Mb/s</span></div>
-    <div class="stat-row"><span class="k">Avg latency</span><span class="v" id="s-lat">0 ms</span></div>
+    <h3>Legend</h3>
+    <div class="legend-row"><div class="swatch" style="background:#ffd27a;box-shadow:0 0 10px #ffd27a"></div><div class="lbl">Sun</div></div>
+    <div class="legend-row"><div class="swatch" style="background:#5fd9ff;box-shadow:0 0 10px #5fd9ff"></div><div class="lbl">Planets</div></div>
+    <div class="legend-row"><div class="swatch" style="background:#c9a0ff;box-shadow:0 0 10px #c9a0ff"></div><div class="lbl">Moons</div></div>
+    <div class="legend-row"><div class="swatch" style="background:#c8a878;box-shadow:0 0 10px #c8a878"></div><div class="lbl">Dwarf planets</div></div>
   </div>
 
   <div class="hud" id="controls">
-    <b>Drag</b> orbit &middot; <b>Scroll</b> zoom &middot; <b>Click</b> a node for detail &middot; <b>Space</b> pause
+    <b>Drag</b> orbit &middot; <b>Scroll</b> zoom &middot; <b>Click</b> a body for detail &middot; <b>Space</b> pause
   </div>
 
   <div id="veil">
-    <div class="logo">ORBITAL DATA TRAFFIC</div>
+    <div class="logo">SOLAR SYSTEM</div>
     <div class="bar"><div id="veilbar"></div></div>
-    <div class="status" id="veilstatus">Initializing network…</div>
+    <div class="status" id="veilstatus">Loading planetary data…</div>
   </div>
 
   <script type="importmap">
