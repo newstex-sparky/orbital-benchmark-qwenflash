@@ -30,17 +30,18 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010208);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(0, 30, 55);
+camera.position.set(0, 60, 120);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance = 2;
-controls.maxDistance = 400;
+controls.minDistance = 0.01;
+controls.maxDistance = 1200;
 
 // ---------- Lighting ----------
-scene.add(new THREE.AmbientLight(0x334455, 0.6));
-const sunLight = new THREE.PointLight(0xfff3d6, 2.2, 0, 0);
+// The Sun is the ONLY light source. No ambient light — the night side of every
+// planet is genuinely dark, exactly as in reality.
+const sunLight = new THREE.PointLight(0xfff3d6, 3.0, 0, 0);
 sunLight.position.set(0, 0, 0);
 scene.add(sunLight);
 
@@ -150,17 +151,18 @@ function buildPlanets() {
       new THREE.SphereGeometry(worldR, 48, 48),
       new THREE.MeshPhongMaterial({ map: tex, shininess: 5 })
     );
-    // subtle glow halo
+    // Fixed-size glow marker so the tiny true-scale planet stays findable.
+    // (At true scale Earth is ~0.018 world units — invisible without a marker.)
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeGlowTexture(p.color), color: p.color, transparent: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.35,
+      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.9,
     }));
-    halo.scale.setScalar(worldR * 2.6);
+    halo.scale.setScalar(0.5); // fixed world size, independent of planet radius
     mesh.add(halo);
 
-    // Saturn rings
+    // Saturn rings — fixed size so they're visible at true scale
     if (p.name === 'Saturn') {
-      const ringGeo = new THREE.RingGeometry(worldR * 1.3, worldR * 2.3, 64);
+      const ringGeo = new THREE.RingGeometry(0.9, 1.6, 64);
       const ringMat = new THREE.MeshBasicMaterial({
         map: getTexture('saturn_ring.jpg'), side: THREE.DoubleSide,
         transparent: true, opacity: 0.9, depthWrite: false,
@@ -202,7 +204,7 @@ function buildMoons() {
     const planetR = rec.worldR;
     moonList.forEach((m) => {
       const orbitR = moonOrbitRadius(m.a, rec.radiusKm);
-      const moonR = Math.max(0.05, moonWorldRadius(m.radius, rec.radiusKm));
+      const moonR = Math.max(0.004, moonWorldRadius(m.radius, rec.radiusKm));
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(moonR, 24, 24),
         new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 3 })
@@ -212,6 +214,13 @@ function buildMoons() {
         mesh.material.map = getTexture('moon.jpg');
         mesh.material.needsUpdate = true;
       }
+      // fixed-size marker so the tiny moon stays findable
+      const mhalo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeGlowTexture(0x88aacc), color: 0x88aacc, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7,
+      }));
+      mhalo.scale.setScalar(0.12);
+      mesh.add(mhalo);
       const orbitLine = makeOrbitRing(orbitR, 0x88aacc, 0.15);
       rec.grp.add(orbitLine);
       rec.grp.add(mesh);
@@ -230,12 +239,19 @@ buildMoons();
 const dwarfMeshes = [];
 function buildDwarfs() {
   DWARF_PLANETS.forEach((d) => {
-    const worldR = Math.max(0.12, planetWorldRadius(d.radius) * 0.5);
+    const worldR = planetWorldRadius(d.radius); // true scale
     const orbitR = planetOrbitRadius(d.a);
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(worldR, 24, 24),
       new THREE.MeshPhongMaterial({ color: d.color, shininess: 2 })
     );
+    // fixed-size marker so the tiny dwarf planet stays findable
+    const dhalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeGlowTexture(d.color), color: d.color, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8,
+    }));
+    dhalo.scale.setScalar(0.3);
+    mesh.add(dhalo);
     const orbitLine = makeOrbitRing(orbitR, d.color, 0.12);
     scene.add(orbitLine);
     scene.add(mesh);
@@ -276,15 +292,14 @@ function setView(name) {
   currentView = name;
   if (name === 'system') {
     viewTarget.set(0, 0, 0);
-    viewDistance = 60;
+    viewDistance = 1150; // fit the whole system incl. Eris (~1082)
   } else {
     const rec = planetMeshes[name];
     if (rec) {
       viewTarget.copy(rec.grp.position);
-      // fit the outermost moon orbit in view
-      let maxOrbit = rec.worldR * 2;
-      for (const m of rec.moons) maxOrbit = Math.max(maxOrbit, m.orbitR);
-      viewDistance = maxOrbit * 3.2 + 2;
+      // Zoom so the planet fills ~40% of the view (distance ≈ r / tan(20°)).
+      // At true scale planets are tiny, so this is a very close approach.
+      viewDistance = rec.worldR * 2.75 + 0.02;
     } else {
       // dwarf planet
       const d = dwarfMeshes.find(x => x.name === name);
@@ -398,15 +413,24 @@ function animate(now) {
 
   // smooth camera transition to selected view
   if (transitioning) {
-    const target = viewTarget;
-    const dist = camera.position.distanceTo(target);
+    // re-fetch the live target each frame so we track a moving planet
+    let target = viewTarget;
+    if (currentView !== 'system') {
+      const rec = planetMeshes[currentView];
+      if (rec) target = rec.grp.position;
+      else {
+        const d = dwarfMeshes.find(x => x.name === currentView);
+        if (d) target = d.mesh.position;
+      }
+    }
     const desired = viewDistance;
-    // move camera toward the target while maintaining orbit radius
-    const dir = camera.position.clone().sub(target).normalize();
-    const newPos = target.clone().add(dir.multiplyScalar(desired));
-    camera.position.lerp(newPos, 0.05);
-    controls.target.lerp(target, 0.05);
-    if (camera.position.distanceTo(newPos) < 0.1) transitioning = false;
+    // Approach from the sunlit side: place the camera between the sun and the
+    // target so the lit hemisphere faces the viewer (sun is the only light).
+    const sunDir = target.clone().normalize(); // from origin (sun) toward target
+    const newPos = target.clone().addScaledVector(sunDir, -desired);
+    camera.position.lerp(newPos, 0.08);
+    controls.target.lerp(target, 0.08);
+    if (camera.position.distanceTo(newPos) < 0.05) transitioning = false;
   }
 
   controls.update();

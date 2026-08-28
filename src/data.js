@@ -3,14 +3,15 @@
 // Solar System Scope textures. Distances in AU (planets) and km (moons).
 
 // ---- Scale model parameters ----
-// Orbital distances are compressed so the whole system fits on screen while
-// preserving relative ordering. Planet sizes are exaggerated vs. true scale
-// (real planets are invisible at orbital scale) but keep correct relative
-// proportions. Moon orbits are compressed relative to their planet.
-export const AU_SCALE = 2.0;          // 1 AU -> world units
-export const PLANET_SIZE_SCALE = 0.4; // Earth radius in world units
-export const MOON_ORBIT_COMPRESS = 0.4; // moon orbit compression factor
-export const SUN_RADIUS = 1.6;        // world units
+// TRUE SCALE: the Sun is 109× Earth's radius, and orbital distances use real
+// AU ratios. Planet sizes are derived from the real Sun:planet radius ratio,
+// so the Sun is genuinely MASSIVE compared to every planet. Distances are
+// proportional to real semi-major axes. (Planets are tiny dots at this scale —
+// the renderer adds always-visible glow markers so they stay findable.)
+export const AU_SCALE = 16.0;         // 1 AU -> world units (proportional, viewable)
+export const SUN_RADIUS = 2.0;        // world units
+export const SUN_KM = 696340;          // Sun radius in km (real)
+export const MOON_ORBIT_COMPRESS = 1.0; // true scale (no compression)
 
 // ---- Planets ----
 // a: semi-major axis (AU), e: eccentricity, i: inclination (deg),
@@ -119,16 +120,18 @@ export const DWARF_PLANETS = [
 export function planetOrbitRadius(au) {
   return au * AU_SCALE;
 }
-// Convert planet radius (km) to world units (exaggerated but proportional).
+// Convert planet radius (km) to world units — TRUE SCALE relative to the Sun.
+// Sun radius = SUN_RADIUS world units = SUN_KM km, so a planet's world radius
+// is (planet_km / SUN_KM) * SUN_RADIUS. This makes the Sun genuinely 109× Earth.
 export function planetWorldRadius(radiusKm) {
-  return (radiusKm / 6371.0) * PLANET_SIZE_SCALE;
+  return (radiusKm / SUN_KM) * SUN_RADIUS;
 }
 // Convert moon semi-major axis (km) to world units relative to its planet.
-// Moon orbit = planet's world radius × (real moon distance in planet radii) × compress.
+// TRUE SCALE: moon distance in planet-radii × planet's world radius.
 export function moonOrbitRadius(moonAkm, planetRadiusKm) {
   return planetWorldRadius(planetRadiusKm) * (moonAkm / planetRadiusKm) * MOON_ORBIT_COMPRESS;
 }
 // Convert moon radius (km) to world units relative to its planet.
 export function moonWorldRadius(moonRadiusKm, planetRadiusKm) {
-  return (moonRadiusKm / planetRadiusKm) * PLANET_SIZE_SCALE;
+  return (moonRadiusKm / planetRadiusKm) * planetWorldRadius(planetRadiusKm);
 }
