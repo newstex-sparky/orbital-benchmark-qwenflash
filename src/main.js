@@ -13,6 +13,11 @@ import {
   planetOrbitRadius, planetWorldRadius, moonOrbitRadius, moonWorldRadius,
   SUN_RADIUS, AU_SCALE,
 } from './data.js';
+import { bodyAppearance } from './appearance.js';
+import { addAtmosphere, addAurora } from './textures.js';
+
+// aurora sprites collected for gentle pulsing in the animation loop
+const auroraSprites = [];
 
 // procedural glow texture cache (declared at module top — used during init)
 const _glowCache = {};
@@ -47,7 +52,7 @@ controls.maxDistance = 3000;
 // even when you focus in. Real sunlight IS effectively parallel rays (the Sun
 // is 109× the planets), so uniform directional-style intensity is the correct,
 // visible model. The night side still gets nothing (no ambient).
-const sunLight = new THREE.PointLight(0xfff3d6, 1.6, 0, 0);
+const sunLight = new THREE.PointLight(0xfff3d6, 0.85, 0, 0);
 sunLight.decay = 0;               // no distance falloff (parallel sunlight)
 sunLight.position.set(0, 0, 0);
 scene.add(sunLight);
@@ -171,11 +176,20 @@ function buildPlanets() {
     const worldR = planetWorldRadius(p.radius);
     const orbitR = planetOrbitRadius(p.a);
     const tex = getTexture(p.texture);
+    const app = bodyAppearance(p.name);
 
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(worldR, 48, 48),
       new THREE.MeshPhongMaterial({ map: tex, shininess: 5 })
     );
+    // Apply procedural texture if the recipe provides one (overrides real map)
+    if (app.texture) {
+      mesh.material.map = app.texture;
+      mesh.material.needsUpdate = true;
+    }
+    // Atmosphere rim + polar auroras
+    if (app.atmosphere) addAtmosphere(mesh, app.atmosphere.color, app.atmosphere.intensity, app.atmosphere.scale);
+    if (app.aurora) auroraSprites.push(...addAurora(mesh, app.aurora.color, app.aurora.intensity, app.aurora.radiusScale));
     // Fixed-size glow marker so the tiny true-scale planet stays findable.
     // (At true scale Earth is ~0.018 world units — invisible without a marker.)
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -236,15 +250,24 @@ function buildMoons() {
     moonList.forEach((m) => {
       const orbitR = moonOrbitRadius(m.a, rec.radiusKm);
       const moonR = Math.max(0.004, moonWorldRadius(m.radius, rec.radiusKm));
+      const app = bodyAppearance(m.name);
+      const mat = new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 3 });
+      if (app.texture) {
+        mat.map = app.texture;
+        mat.needsUpdate = true;
+      }
       const mesh = new THREE.Mesh(
         new THREE.SphereGeometry(moonR, 24, 24),
-        new THREE.MeshPhongMaterial({ color: 0xcccccc, shininess: 3 })
+        mat
       );
       // Moon gets its texture
       if (planetName === 'Earth' && m.name === 'Moon') {
         mesh.material.map = getTexture('moon.jpg');
         mesh.material.needsUpdate = true;
       }
+      // Atmosphere rim + polar auroras (e.g. Titan)
+      if (app.atmosphere) addAtmosphere(mesh, app.atmosphere.color, app.atmosphere.intensity, app.atmosphere.scale);
+      if (app.aurora) auroraSprites.push(...addAurora(mesh, app.aurora.color, app.aurora.intensity, app.aurora.radiusScale));
       // fixed-size marker so the tiny moon stays findable
       const mhalo = new THREE.Sprite(new THREE.SpriteMaterial({
         map: makeGlowTexture(0x88aacc), color: 0x88aacc, transparent: true,
@@ -272,10 +295,15 @@ function buildDwarfs() {
   DWARF_PLANETS.forEach((d) => {
     const worldR = planetWorldRadius(d.radius); // true scale
     const orbitR = planetOrbitRadius(d.a);
+    const app = bodyAppearance(d.name);
+    const mat = new THREE.MeshPhongMaterial({ color: d.color, shininess: 2 });
+    if (app.texture) { mat.map = app.texture; mat.needsUpdate = true; }
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(worldR, 24, 24),
-      new THREE.MeshPhongMaterial({ color: d.color, shininess: 2 })
+      mat
     );
+    if (app.atmosphere) addAtmosphere(mesh, app.atmosphere.color, app.atmosphere.intensity, app.atmosphere.scale);
+    if (app.aurora) addAurora(mesh, app.aurora.color, app.aurora.intensity, app.aurora.radiusScale);
     // fixed-size marker so the tiny dwarf planet stays findable
     const dhalo = new THREE.Sprite(new THREE.SpriteMaterial({
       map: makeGlowTexture(d.color), color: d.color, transparent: true,
@@ -292,7 +320,7 @@ function buildDwarfs() {
     orbitRings.push(hitRing);
     scene.add(hitRing);
     scene.add(mesh);
-    dwarfMeshes.push({ mesh, orbitR, period: d.period, e: d.e, i: d.i, phase: Math.random() * Math.PI * 2, name: d.name, halo: dhalo });
+    dwarfMeshes.push({ mesh, orbitR, period: d.period, e: d.e, i: d.i, phase: Math.random() * Math.PI * 2, name: d.name, halo: dhalo, color: d.color });
     mesh.userData = { type: 'dwarf', name: d.name };
     allSelectables.push(mesh);
   });
@@ -305,9 +333,12 @@ function buildAsteroids() {
   ASTEROIDS.forEach((a) => {
     const worldR = Math.max(0.004, planetWorldRadius(a.radius)); // true scale, min visible
     const orbitR = planetOrbitRadius(a.a);
+    const app = bodyAppearance(a.name);
+    const mat = new THREE.MeshPhongMaterial({ color: a.color, shininess: 2 });
+    if (app.texture) { mat.map = app.texture; mat.needsUpdate = true; }
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(worldR, 16, 16),
-      new THREE.MeshPhongMaterial({ color: a.color, shininess: 2 })
+      mat
     );
     // fixed-size marker so the tiny asteroid stays findable
     const ahalo = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -895,6 +926,13 @@ function animate(now) {
   }
 
   tickHighlight(dt);
+  // gentle aurora shimmer
+  const tAur = performance.now() * 0.001;
+  for (let i = 0; i < auroraSprites.length; i++) {
+    const s = auroraSprites[i];
+    const base = s.userData.baseOpacity || 0.5;
+    s.material.opacity = base * (0.75 + 0.25 * Math.sin(tAur * 1.3 + i * 1.7));
+  }
   controls.update();
   composer.render();
 }
@@ -902,7 +940,7 @@ function animate(now) {
 // ---------- Post-processing ----------
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.5, 0.2);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.4, 0.5, 0.2);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
