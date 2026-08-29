@@ -9,7 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import {
-  PLANETS, MOONS, DWARF_PLANETS,
+  PLANETS, MOONS, DWARF_PLANETS, ASTEROIDS,
   planetOrbitRadius, planetWorldRadius, moonOrbitRadius, moonWorldRadius,
   SUN_RADIUS, AU_SCALE,
 } from './data.js';
@@ -299,6 +299,39 @@ function buildDwarfs() {
 }
 buildDwarfs();
 
+// ---------- Asteroids (large / notable) ----------
+const asteroidMeshes = [];
+function buildAsteroids() {
+  ASTEROIDS.forEach((a) => {
+    const worldR = Math.max(0.004, planetWorldRadius(a.radius)); // true scale, min visible
+    const orbitR = planetOrbitRadius(a.a);
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(worldR, 16, 16),
+      new THREE.MeshPhongMaterial({ color: a.color, shininess: 2 })
+    );
+    // fixed-size marker so the tiny asteroid stays findable
+    const ahalo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeGlowTexture(a.color), color: a.color, transparent: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.6,
+    }));
+    ahalo.scale.setScalar(0.18);
+    mesh.add(ahalo);
+    const orbitLine = makeOrbitRing(orbitR, a.color, 0.1);
+    orbitLine.userData = { type: 'orbitRing', name: a.name, asteroid: true };
+    orbitRings.push(orbitLine);
+    scene.add(orbitLine);
+    // wide invisible tap-target ring for mobile
+    const hitRing = makeOrbitHitRing(orbitR, a.name, true);
+    orbitRings.push(hitRing);
+    scene.add(hitRing);
+    scene.add(mesh);
+    asteroidMeshes.push({ mesh, orbitR, period: a.period, e: a.e, i: a.i, phase: Math.random() * Math.PI * 2, name: a.name, halo: ahalo, radiusKm: a.radius, color: a.color });
+    mesh.userData = { type: 'asteroid', name: a.name };
+    allSelectables.push(mesh);
+  });
+}
+buildAsteroids();
+
 // ---------- Asteroid belt (visual richness) ----------
 function buildAsteroidBelt() {
   const N = 1200;
@@ -339,11 +372,16 @@ function setFocusedHalo(name, on) {
     else {
       const d = dwarfMeshes.find(x => x.name === name);
       if (d && d.halo) d.halo.visible = false;
+      else {
+        const a = asteroidMeshes.find(x => x.name === name);
+        if (a && a.halo) a.halo.visible = false;
+      }
     }
   } else {
     // restore all halos
     for (const rec of Object.values(planetMeshes)) if (rec.halo) rec.halo.visible = true;
     for (const d of dwarfMeshes) if (d.halo) d.halo.visible = true;
+    for (const a of asteroidMeshes) if (a.halo) a.halo.visible = true;
   }
 }
 
@@ -369,7 +407,11 @@ function updateViewIndicator(name) {
   if (rec) viewIndIcon.style.color = '#' + rec.color.toString(16).padStart(6, '0');
   else {
     const d = dwarfMeshes.find(x => x.name === name);
-    viewIndIcon.style.color = d ? '#' + d.color.toString(16).padStart(6, '0') : '#eaf7ff';
+    if (d) viewIndIcon.style.color = '#' + d.color.toString(16).padStart(6, '0');
+    else {
+      const a = asteroidMeshes.find(x => x.name === name);
+      viewIndIcon.style.color = a ? '#' + a.color.toString(16).padStart(6, '0') : '#eaf7ff';
+    }
   }
 }
 
@@ -397,11 +439,13 @@ function setView(name) {
       const sunDir = viewTarget.clone().normalize().multiplyScalar(-1);
       focusOffset.copy(sunDir).multiplyScalar(viewDistance * 6);
     } else {
-      // dwarf planet
+      // dwarf planet or asteroid
       const d = dwarfMeshes.find(x => x.name === name);
-      if (d) {
-        viewTarget.copy(d.mesh.position);
-        viewDistance = d.mesh.geometry.parameters.radius * 3;
+      const a = asteroidMeshes.find(x => x.name === name);
+      const body = d || a;
+      if (body) {
+        viewTarget.copy(body.mesh.position);
+        viewDistance = body.mesh.geometry.parameters.radius * 3;
         focusDist = viewDistance;
         const sunDir = viewTarget.clone().normalize().multiplyScalar(-1);
         focusOffset.copy(sunDir).multiplyScalar(viewDistance * 6);
@@ -427,6 +471,131 @@ titleEl.addEventListener('click', () => {
   select.value = next;
   setView(next);
 });
+
+// ---------- Mobile app-style body drawer ----------
+const menuBtn = document.getElementById('menu-btn');
+const drawer = document.getElementById('drawer');
+const drawerScrim = document.getElementById('drawer-scrim');
+const drawerList = document.getElementById('drawer-list');
+const drawerSearch = document.getElementById('drawer-search-input');
+const drawerClose = document.getElementById('drawer-close');
+
+// Build a flat, searchable list of every body (planets, moons, dwarfs, asteroids).
+// Each entry: { name, type, glyph, color, meta, focusName }
+function buildBodyIndex() {
+  const list = [];
+  // Full system first
+  list.push({ name: 'Full Solar System', type: 'system', glyph: '☀', color: '#ffd27a', meta: 'All bodies', focusName: 'system' });
+  // Planets
+  for (const p of PLANETS) {
+    const rec = planetMeshes[p.name];
+    list.push({
+      name: p.name, type: 'planet', glyph: BODY_GLYPH[p.name] || '☉',
+      color: '#' + p.color.toString(16).padStart(6, '0'),
+      meta: `${rec ? rec.moons.length : 0} moon${rec && rec.moons.length === 1 ? '' : 's'} · ${p.a} AU`,
+      focusName: p.name,
+    });
+  }
+  // Moons (grouped under their host planet)
+  for (const [planetName, moonList] of Object.entries(MOONS)) {
+    for (const m of moonList) {
+      list.push({
+        name: m.name, type: 'moon', glyph: '☾', color: '#c9a0ff',
+        meta: `moon of ${planetName} · ${m.radius} km`, focusName: planetName,
+      });
+    }
+  }
+  // Dwarf planets
+  for (const d of DWARF_PLANETS) {
+    list.push({
+      name: d.name, type: 'dwarf', glyph: BODY_GLYPH[d.name] || '☄',
+      color: '#' + d.color.toString(16).padStart(6, '0'),
+      meta: `dwarf planet · ${d.a} AU`, focusName: d.name,
+    });
+  }
+  // Asteroids
+  for (const a of ASTEROIDS) {
+    list.push({
+      name: a.name, type: 'asteroid', glyph: '✦', color: '#' + a.color.toString(16).padStart(6, '0'),
+      meta: `asteroid · ${a.a} AU`, focusName: a.name,
+    });
+  }
+  return list;
+}
+const bodyIndex = buildBodyIndex();
+
+function openDrawer() {
+  drawer.classList.remove('hidden');
+  drawerScrim.classList.remove('hidden');
+  renderDrawer('');
+  drawerSearch.value = '';
+  setTimeout(() => drawerSearch.focus(), 50);
+}
+function closeDrawer() {
+  drawer.classList.add('hidden');
+  drawerScrim.classList.add('hidden');
+}
+menuBtn.addEventListener('click', openDrawer);
+drawerClose.addEventListener('click', closeDrawer);
+drawerScrim.addEventListener('click', closeDrawer);
+
+// Render the filtered list. Group by type when not searching.
+function renderDrawer(query) {
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? bodyIndex.filter(b => b.name.toLowerCase().includes(q) || b.type.includes(q) || b.meta.toLowerCase().includes(q))
+    : bodyIndex;
+
+  let html = '';
+  if (q) {
+    // Flat results while searching
+    for (const b of filtered) html += drawerItemHTML(b);
+    if (!filtered.length) html = '<div class="drawer-group-label" style="text-align:center;padding:24px 0">No bodies match “' + query + '”</div>';
+  } else {
+    // Grouped by type
+    const groups = [
+      { label: 'System', items: filtered.filter(b => b.type === 'system') },
+      { label: 'Planets', items: filtered.filter(b => b.type === 'planet') },
+      { label: 'Moons', items: filtered.filter(b => b.type === 'moon') },
+      { label: 'Dwarf Planets', items: filtered.filter(b => b.type === 'dwarf') },
+      { label: 'Asteroids', items: filtered.filter(b => b.type === 'asteroid') },
+    ];
+    for (const g of groups) {
+      if (!g.items.length) continue;
+      html += `<div class="drawer-group-label">${g.label}</div>`;
+      for (const b of g.items) html += drawerItemHTML(b);
+    }
+  }
+  drawerList.innerHTML = html;
+
+  // Wire clicks
+  drawerList.querySelectorAll('.drawer-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.focus;
+      select.value = name;
+      setView(name);
+      closeDrawer();
+    });
+  });
+}
+
+function drawerItemHTML(b) {
+  const current = currentView === b.focusName;
+  return `<div class="drawer-item${current ? ' current' : ''}" data-focus="${b.focusName}">
+    <div class="glyph" style="background:${b.color};box-shadow:0 0 8px ${b.color}">${b.glyph}</div>
+    <div class="name">${b.name}</div>
+    <div class="meta">${b.meta}</div>
+    <div class="chev">›</div>
+  </div>`;
+}
+
+drawerSearch.addEventListener('input', () => renderDrawer(drawerSearch.value));
+// Re-render when the focused body changes so the "current" highlight stays fresh
+const _origSetView = setView;
+setView = function (name) {
+  _origSetView(name);
+  if (!drawer.classList.contains('hidden')) renderDrawer(drawerSearch.value);
+};
 
 // ---------- Raycaster for selection ----------
 const raycaster = new THREE.Raycaster();
@@ -502,6 +671,10 @@ function highlightRing(name, color) {
   else {
     const d = dwarfMeshes.find(x => x.name === name);
     if (d) radius = d.orbitR;
+    else {
+      const a = asteroidMeshes.find(x => x.name === name);
+      if (a) radius = a.orbitR;
+    }
   }
   if (!radius) return;
   highlightMesh.geometry.dispose();
@@ -562,6 +735,21 @@ function handleSelect(clientX, clientY) {
         infoEl.innerHTML = `<h3 style="color:#c8a878;font-size:11px;letter-spacing:2px;margin-bottom:6px">DWARF PLANET</h3>
           <div style="color:#eaf7ff;font-weight:600;font-size:14px;margin-bottom:6px">${d.name}</div>`;
         infoEl.style.display = 'block';
+      } else if (d.type === 'asteroid') {
+        focusBtn.classList.add('hidden');
+        const a = asteroidMeshes.find(x => x.name === d.name);
+        infoEl.innerHTML = `<h3 style="color:#b8a888;font-size:11px;letter-spacing:2px;margin-bottom:6px">ASTEROID</h3>
+          <div style="color:#eaf7ff;font-weight:600;font-size:14px;margin-bottom:6px">${d.name}</div>
+          <div><span style="color:#7fa3c4">Orbit</span> ${a ? a.orbitR.toFixed(1) : '—'} AU</div>
+          <div><span style="color:#7fa3c4">Period</span> ${a ? a.period.toFixed(0) : '—'} days</div>
+          <div><span style="color:#7fa3c4">Radius</span> ${a ? a.radiusKm.toFixed(1) : '—'} km</div>
+          <div style="margin-top:10px"><button class="mini-btn">Focus \u2192 ${d.name}</button></div>`;
+        infoEl.style.display = 'block';
+        const mini = infoEl.querySelector('.mini-btn');
+        if (mini) mini.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          setView(d.name); select.value = d.name; infoEl.style.display = 'none';
+        });
       }
       return;
     }
@@ -641,6 +829,11 @@ function updatePositions() {
     const pos = keplerPos(d, simTime);
     d.mesh.position.copy(pos);
   }
+  // asteroids
+  for (const a of asteroidMeshes) {
+    const pos = keplerPos(a, simTime);
+    a.mesh.position.copy(pos);
+  }
 }
 
 function animate(now) {
@@ -663,6 +856,10 @@ function animate(now) {
     else {
       const d = dwarfMeshes.find(x => x.name === currentView);
       if (d) live = d.mesh.position;
+      else {
+        const a = asteroidMeshes.find(x => x.name === currentView);
+        if (a) live = a.mesh.position;
+      }
     }
     if (live) {
       const drift = live.clone().sub(prevFollowPos);

@@ -115,6 +115,27 @@ export const DWARF_PLANETS = [
   { name: 'Eris', a: 67.67, e: 0.4418, i: 44.0, period: 203600.0, radius: 1163.0, color: 0xd8d8e8 },
 ];
 
+// ---- Large / notable asteroids ----
+// a: semi-major axis (AU), e: eccentricity, i: inclination (deg),
+// period: sidereal orbital period (days), radius: mean radius (km),
+// color: base tint for the glow marker.
+export const ASTEROIDS = [
+  { name: 'Vesta', a: 2.362, e: 0.0887, i: 7.14, period: 1325.0, radius: 262.7, color: 0xb8a898 },
+  { name: 'Pallas', a: 2.773, e: 0.2303, i: 34.84, period: 1684.0, radius: 256.0, color: 0x9a9a9a },
+  { name: 'Hygiea', a: 3.141, e: 0.1123, i: 3.83, period: 2031.0, radius: 215.0, color: 0x8a8a8a },
+  { name: 'Psyche', a: 2.924, e: 0.1402, i: 3.10, period: 1826.0, radius: 113.0, color: 0x9a8a7a },
+  { name: 'Juno', a: 2.668, e: 0.2583, i: 12.99, period: 1593.0, radius: 123.0, color: 0xb8a888 },
+  { name: 'Eunomia', a: 2.643, e: 0.1875, i: 11.75, period: 1568.0, radius: 134.0, color: 0x9a9a9a },
+  { name: 'Davida', a: 3.164, e: 0.1880, i: 15.94, period: 2053.0, radius: 145.0, color: 0x8a8a8a },
+  { name: 'Interamnia', a: 3.062, e: 0.1510, i: 17.28, period: 1955.0, radius: 158.0, color: 0x9a9a9a },
+  { name: 'Eros', a: 1.458, e: 0.2227, i: 10.83, period: 643.0, radius: 8.4, color: 0x8a7a6a },
+  { name: 'Apophis', a: 0.922, e: 0.1910, i: 3.34, period: 323.0, radius: 0.185, color: 0x7a7a7a },
+  { name: 'Bennu', a: 1.126, e: 0.2037, i: 6.03, period: 436.0, radius: 0.245, color: 0x6a6a6a },
+  { name: 'Gaspra', a: 2.209, e: 0.1734, i: 4.10, period: 1196.0, radius: 6.1, color: 0x8a7a6a },
+  { name: 'Ida', a: 2.861, e: 0.0466, i: 1.14, period: 1766.0, radius: 15.7, color: 0x8a7a6a },
+  { name: 'Itokawa', a: 1.324, e: 0.2772, i: 1.62, period: 556.0, radius: 0.165, color: 0x7a6a5a },
+];
+
 // ---- Derived helpers ----
 // Convert planet semi-major axis (AU) to world units.
 export function planetOrbitRadius(au) {
