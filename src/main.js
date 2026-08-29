@@ -29,7 +29,7 @@ app.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x010208);
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 5000);
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.0001, 5000);
 camera.position.set(0, 60, 120);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -41,7 +41,14 @@ controls.maxDistance = 3000;
 // ---------- Lighting ----------
 // The Sun is the ONLY light source. No ambient light — the night side of every
 // planet is genuinely dark, exactly as in reality.
-const sunLight = new THREE.PointLight(0xfff3d6, 3.0, 0, 0);
+// NOTE: decay=0 keeps sun illumination UNIFORM across the whole system. With
+// default physical (1/r²) falloff, planets tens of AU out receive ~zero light
+// and render as near-black spheres — indistinguishable from their night side
+// even when you focus in. Real sunlight IS effectively parallel rays (the Sun
+// is 109× the planets), so uniform directional-style intensity is the correct,
+// visible model. The night side still gets nothing (no ambient).
+const sunLight = new THREE.PointLight(0xfff3d6, 1.6, 0, 0);
+sunLight.decay = 0;               // no distance falloff (parallel sunlight)
 sunLight.position.set(0, 0, 0);
 scene.add(sunLight);
 
@@ -210,7 +217,7 @@ function buildPlanets() {
       mesh, grp, orbitR, period: p.period, e: p.e, i: p.i,
       phase: Math.random() * Math.PI * 2, worldR, color: p.color,
       name: p.name, info: p.info, radiusKm: p.radius, rotPeriod: p.rotPeriod,
-      moons: [],
+      halo, moons: [],
     };
     planetMeshes[p.name] = rec;
     planetGroups[p.name] = grp;
@@ -285,7 +292,7 @@ function buildDwarfs() {
     orbitRings.push(hitRing);
     scene.add(hitRing);
     scene.add(mesh);
-    dwarfMeshes.push({ mesh, orbitR, period: d.period, e: d.e, i: d.i, phase: Math.random() * Math.PI * 2, name: d.name });
+    dwarfMeshes.push({ mesh, orbitR, period: d.period, e: d.e, i: d.i, phase: Math.random() * Math.PI * 2, name: d.name, halo: dhalo });
     mesh.userData = { type: 'dwarf', name: d.name };
     allSelectables.push(mesh);
   });
@@ -317,6 +324,28 @@ let currentView = 'system'; // 'system' or planet name
 let viewTarget = new THREE.Vector3(0, 0, 0);
 let viewDistance = 60;
 let transitioning = false;
+let isFocused = false;          // true when focused on a single planet/dwarf
+let followPos = new THREE.Vector3(0, 0, 0);   // live planet position (focus follow)
+let prevFollowPos = new THREE.Vector3();
+let focusDist = 0;              // camera distance from planet while focused
+let focusOffset = new THREE.Vector3(0, 0, 600); // eased camera offset from planet (start far, transition eases in)
+
+// Show/hide the fixed-size marker halo when entering/leaving focus so the
+// real planet body (not the findability glow) is what fills the close-up view.
+function setFocusedHalo(name, on) {
+  if (on) {
+    const rec = planetMeshes[name];
+    if (rec && rec.halo) rec.halo.visible = false;
+    else {
+      const d = dwarfMeshes.find(x => x.name === name);
+      if (d && d.halo) d.halo.visible = false;
+    }
+  } else {
+    // restore all halos
+    for (const rec of Object.values(planetMeshes)) if (rec.halo) rec.halo.visible = true;
+    for (const d of dwarfMeshes) if (d.halo) d.halo.visible = true;
+  }
+}
 
 // Current-view indicator in the banner
 const viewIndText = document.getElementById('view-ind-text');
@@ -345,8 +374,13 @@ function updateViewIndicator(name) {
 }
 
 function setView(name) {
+  // leave focus: restore any halos we hid
+  if (isFocused && name === 'system') setFocusedHalo(currentView, false);
   currentView = name;
   updateViewIndicator(name);
+  // Entering a focused view clears any lingering tap-highlight immediately
+  if (name !== 'system') { clearHighlight(); setFocusedHalo(name, true); }
+  isFocused = name !== 'system';
   if (name === 'system') {
     viewTarget.set(0, 0, 0);
     viewDistance = 1150; // fit the whole system incl. Eris (~1082)
@@ -356,16 +390,25 @@ function setView(name) {
       viewTarget.copy(rec.grp.position);
       // Zoom so the planet fills ~40% of the view (distance ≈ r / tan(20°)).
       // At true scale planets are tiny, so this is a very close approach.
-      viewDistance = rec.worldR * 2.75 + 0.02;
+      viewDistance = rec.worldR * 3;
+      focusDist = viewDistance;
+      // Start the eased offset far out (behind the planet on the sun side)
+      // and let the transition pull it in to the close framing.
+      const sunDir = viewTarget.clone().normalize().multiplyScalar(-1);
+      focusOffset.copy(sunDir).multiplyScalar(viewDistance * 6);
     } else {
       // dwarf planet
       const d = dwarfMeshes.find(x => x.name === name);
       if (d) {
         viewTarget.copy(d.mesh.position);
-        viewDistance = 3;
+        viewDistance = d.mesh.geometry.parameters.radius * 3;
+        focusDist = viewDistance;
+        const sunDir = viewTarget.clone().normalize().multiplyScalar(-1);
+        focusOffset.copy(sunDir).multiplyScalar(viewDistance * 6);
       }
     }
   }
+  prevFollowPos.copy(viewTarget);
   transitioning = true;
 }
 
@@ -432,17 +475,24 @@ function showFocusButton(name) {
 }
 
 // ---------- Tapped-ring pulse highlight ----------
-// A glowing torus that briefly pulses on the ring the user tapped, so they
-// see exactly which orbit they're about to focus.
+// A soft, faint glow that briefly pulses on the ring the user tapped, so they
+// see which orbit they're about to focus. Deliberately subtle — it's a hint,
+// not a spotlight.
+const highlightMat = new THREE.MeshBasicMaterial({ color: 0x7fd9ff, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false });
 const highlightMesh = new THREE.Mesh(
-  new THREE.TorusGeometry(1, 0.6, 12, 128),
-  new THREE.MeshBasicMaterial({ color: 0x5fd9ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
+  new THREE.TorusGeometry(1, 0.02, 12, 128),
+  highlightMat
 );
 highlightMesh.rotation.x = Math.PI / 2;
 highlightMesh.visible = false;
 scene.add(highlightMesh);
 let highlightT = -1;        // -1 = inactive, else elapsed time of the pulse
-let highlightColor = 0x5fd9ff;
+
+function clearHighlight() {
+  highlightT = -1;
+  highlightMesh.visible = false;
+  highlightMat.opacity = 0;
+}
 
 function highlightRing(name, color) {
   // Determine the orbit radius for the tapped body
@@ -454,13 +504,11 @@ function highlightRing(name, color) {
     if (d) radius = d.orbitR;
   }
   if (!radius) return;
-  highlightMesh.scale.setScalar(1);
-  // Rebuild the torus at the correct radius (or scale an initially-1m torus)
   highlightMesh.geometry.dispose();
-  highlightMesh.geometry = new THREE.TorusGeometry(radius, radius * 0.03, 12, 128);
+  // Thin, subtle tube — just enough to trace the ring, no heavy banding
+  highlightMesh.geometry = new THREE.TorusGeometry(radius, radius * 0.012, 12, 128);
   highlightMesh.rotation.x = Math.PI / 2;
-  highlightColor = color || 0x5fd9ff;
-  highlightMesh.material.color.setHex(highlightColor);
+  highlightMat.color.setHex(color || 0x7fd9ff);
   highlightMesh.visible = true;
   highlightT = 0;
 }
@@ -469,11 +517,11 @@ function highlightRing(name, color) {
 function tickHighlight(dt) {
   if (highlightT < 0) return;
   highlightT += dt;
-  const dur = 1.6;
-  if (highlightT > dur) { highlightMesh.visible = false; highlightT = -1; return; }
-  // pulsing opacity: bright then fade
+  const dur = 1.8; // a touch longer but gentler
+  if (highlightT > dur) { clearHighlight(); return; }
+  // gentle sine swell, low peak — a soft blink, not a flash
   const p = Math.sin((highlightT / dur) * Math.PI); // 0→1→0
-  highlightMesh.material.opacity = 0.25 + 0.75 * p;
+  highlightMat.opacity = 0.12 + 0.35 * p;            // peak ~0.47
 }
 
 function handleSelect(clientX, clientY) {
@@ -606,26 +654,47 @@ function animate(now) {
     sun.rotation.y += dt * 0.01;
   }
 
-  // smooth camera transition to selected view
-  if (transitioning) {
-    // re-fetch the live target each frame so we track a moving planet
-    let target = viewTarget;
-    if (currentView !== 'system') {
-      const rec = planetMeshes[currentView];
-      if (rec) target = rec.grp.position;
-      else {
-        const d = dwarfMeshes.find(x => x.name === currentView);
-        if (d) target = d.mesh.position;
-      }
+  // smooth camera transition to selected view, then keep following the planet
+  if (isFocused && currentView !== 'system') {
+    // live position of the focused body
+    const rec = planetMeshes[currentView];
+    let live = null;
+    if (rec) live = rec.grp.position;
+    else {
+      const d = dwarfMeshes.find(x => x.name === currentView);
+      if (d) live = d.mesh.position;
     }
-    const desired = viewDistance;
-    // Approach from the sunlit side: place the camera between the sun and the
-    // target so the lit hemisphere faces the viewer (sun is the only light).
-    const sunDir = target.clone().normalize(); // from origin (sun) toward target
-    const newPos = target.clone().addScaledVector(sunDir, -desired);
+    if (live) {
+      const drift = live.clone().sub(prevFollowPos);
+      if (transitioning) {
+        // Ease the camera's OFFSET from the planet (not its absolute world pos).
+        // Approach from the sunlit side: the goal offset puts the camera between
+        // the sun and the planet so the viewer sees the lit hemisphere.
+        const sunDir = live.clone().normalize();           // from sun toward planet
+        const goal = sunDir.multiplyScalar(-focusDist);    // desired camera offset
+        focusOffset.lerp(goal, 0.15);
+        // Place the camera exactly at planet + eased offset every frame — this
+        // converges even though the planet moves, unlike a slow world-lerp.
+        camera.position.copy(live).add(focusOffset);
+        controls.target.copy(live);
+        if (focusOffset.distanceTo(goal) < focusDist * 0.02) {
+          transitioning = false;
+        }
+      } else {
+        // Transition done — translate camera + target by the planet's
+        // frame-to-frame drift so the body stays framed, WITHOUT overriding the
+        // user's one-finger orbit/zoom (their drag still rotates the view).
+        camera.position.add(drift);
+        controls.target.copy(live);
+      }
+      prevFollowPos.copy(live);
+    }
+  } else if (transitioning) {
+    // System view (or leaving focus): center on the origin
+    const newPos = viewTarget.clone().add(new THREE.Vector3(0, 0.35 * viewDistance, 0.78 * viewDistance));
     camera.position.lerp(newPos, 0.08);
-    controls.target.lerp(target, 0.08);
-    if (camera.position.distanceTo(newPos) < 0.05) transitioning = false;
+    controls.target.lerp(viewTarget, 0.08);
+    if (camera.position.distanceTo(newPos) < 0.5) transitioning = false;
   }
 
   tickHighlight(dt);
@@ -636,7 +705,7 @@ function animate(now) {
 // ---------- Post-processing ----------
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.9, 0.5, 0.2);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.5, 0.2);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
