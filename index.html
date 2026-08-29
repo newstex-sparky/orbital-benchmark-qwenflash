@@ -35,6 +35,16 @@
     text-shadow: 0 0 24px rgba(95, 217, 255, 0.6);
   }
   #title .sub { font-size: 11px; letter-spacing: 1.5px; color: var(--muted); margin-top: 4px; }
+  /* Current-view indicator pill */
+  .view-ind {
+    margin-top: 10px; display: inline-flex; align-items: center; gap: 7px;
+    background: rgba(8,14,26,0.7); border: 1px solid var(--panel-border);
+    border-radius: 14px; padding: 4px 11px; font-size: 11px;
+    font-weight: 600; letter-spacing: 1px; color: var(--text);
+    backdrop-filter: blur(6px);
+  }
+  .view-ind-icon { font-size: 13px; line-height: 1; }
+  #view-ind-text { transition: color 0.2s ease; }
 
   /* Dropdown */
   #nav { top: 22px; right: 28px; pointer-events: auto; }
@@ -157,6 +167,9 @@
     #legend { width: 160px; }
     #title h1 { font-size: 15px; }
     #nav select { min-width: 140px; font-size: 12px; }
+    #nav { top: 18px; right: 16px; }
+    .view-ind { font-size: 10px; padding: 3px 8px; }
+    #speed { width: 170px; }
   }
 </style>
 </head>
@@ -166,6 +179,7 @@
   <div class="hud" id="title">
     <h1>Solar System</h1>
     <div class="sub">FULL-SCALE MODEL &middot; REAL ORBITAL DATA</div>
+    <div class="view-ind"><span class="view-ind-icon" id="view-ind-icon">☀</span><span id="view-ind-text">Full Solar System</span></div>
   </div>
 
   <div class="hud" id="nav">

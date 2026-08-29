@@ -318,8 +318,35 @@ let viewTarget = new THREE.Vector3(0, 0, 0);
 let viewDistance = 60;
 let transitioning = false;
 
+// Current-view indicator in the banner
+const viewIndText = document.getElementById('view-ind-text');
+const viewIndIcon = document.getElementById('view-ind-icon');
+// Per-body icon + accent color for the indicator pill
+const BODY_GLYPH = {
+  Mercury: '☿', Venus: '♀', Earth: '⊕', Mars: '♂', Jupiter: '♃',
+  Saturn: '♄', Uranus: '♅', Neptune: '♆', Ceres: '⚳', Pluto: '♇',
+  Haumea: '☄', Makemake: '☄', Eris: '☄',
+};
+function updateViewIndicator(name) {
+  if (name === 'system' || !viewIndText) {
+    viewIndText.textContent = 'Full Solar System';
+    viewIndIcon.textContent = '☀';
+    viewIndIcon.style.color = '#ffd27a';
+    return;
+  }
+  viewIndText.textContent = name;
+  viewIndIcon.textContent = BODY_GLYPH[name] || '☉';
+  const rec = planetMeshes[name];
+  if (rec) viewIndIcon.style.color = '#' + rec.color.toString(16).padStart(6, '0');
+  else {
+    const d = dwarfMeshes.find(x => x.name === name);
+    viewIndIcon.style.color = d ? '#' + d.color.toString(16).padStart(6, '0') : '#eaf7ff';
+  }
+}
+
 function setView(name) {
   currentView = name;
+  updateViewIndicator(name);
   if (name === 'system') {
     viewTarget.set(0, 0, 0);
     viewDistance = 1150; // fit the whole system incl. Eris (~1082)
@@ -399,6 +426,54 @@ function showFocusButton(name) {
   focusTarget = name;
   focusBtn.textContent = 'Focus \u2192 ' + name;
   focusBtn.classList.remove('hidden');
+  // Color the tap-highlight to match the planet
+  const p = planetMeshes[name];
+  if (p) highlightRing(name, p.color);
+}
+
+// ---------- Tapped-ring pulse highlight ----------
+// A glowing torus that briefly pulses on the ring the user tapped, so they
+// see exactly which orbit they're about to focus.
+const highlightMesh = new THREE.Mesh(
+  new THREE.TorusGeometry(1, 0.6, 12, 128),
+  new THREE.MeshBasicMaterial({ color: 0x5fd9ff, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
+);
+highlightMesh.rotation.x = Math.PI / 2;
+highlightMesh.visible = false;
+scene.add(highlightMesh);
+let highlightT = -1;        // -1 = inactive, else elapsed time of the pulse
+let highlightColor = 0x5fd9ff;
+
+function highlightRing(name, color) {
+  // Determine the orbit radius for the tapped body
+  let radius = null;
+  const p = planetMeshes[name];
+  if (p) radius = p.orbitR;
+  else {
+    const d = dwarfMeshes.find(x => x.name === name);
+    if (d) radius = d.orbitR;
+  }
+  if (!radius) return;
+  highlightMesh.scale.setScalar(1);
+  // Rebuild the torus at the correct radius (or scale an initially-1m torus)
+  highlightMesh.geometry.dispose();
+  highlightMesh.geometry = new THREE.TorusGeometry(radius, radius * 0.03, 12, 128);
+  highlightMesh.rotation.x = Math.PI / 2;
+  highlightColor = color || 0x5fd9ff;
+  highlightMesh.material.color.setHex(highlightColor);
+  highlightMesh.visible = true;
+  highlightT = 0;
+}
+
+// Fade the pulse in the animation loop
+function tickHighlight(dt) {
+  if (highlightT < 0) return;
+  highlightT += dt;
+  const dur = 1.6;
+  if (highlightT > dur) { highlightMesh.visible = false; highlightT = -1; return; }
+  // pulsing opacity: bright then fade
+  const p = Math.sin((highlightT / dur) * Math.PI); // 0→1→0
+  highlightMesh.material.opacity = 0.25 + 0.75 * p;
 }
 
 function handleSelect(clientX, clientY) {
@@ -450,6 +525,7 @@ function handleSelect(clientX, clientY) {
     const ring = ringHits[0].object.userData;
     infoEl.style.display = 'none';
     showFocusButton(ring.name);
+    highlightRing(ring.name);
     return;
   }
 
@@ -552,6 +628,7 @@ function animate(now) {
     if (camera.position.distanceTo(newPos) < 0.05) transitioning = false;
   }
 
+  tickHighlight(dt);
   controls.update();
   composer.render();
 }
