@@ -136,10 +136,28 @@ function makeOrbitRing(radius, color, opacity = 0.25, segments = 256) {
   return new THREE.Line(g, m);
 }
 
+// Invisible, thick 3D hit-target ring so a tap anywhere on an orbit reliably
+// registers. A Torus (donut) raycasts cleanly from ANY camera angle, unlike a
+// flat disc which is edge-on and invisible to raycasts from most views.
+function makeOrbitHitRing(radius, name, dwarf = false) {
+  // Tube thickness scales gently with the orbit so inner rings stay tappable
+  // and outer rings get a comfortably wide target.
+  const tube = Math.max(0.9, radius * 0.02);
+  const geom = new THREE.TorusGeometry(radius, tube, 10, 96);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.0, depthWrite: false, depthTest: false,
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.rotation.x = Math.PI / 2; // lay in the ecliptic plane (donut already axis-aligned Y)
+  mesh.userData = { type: 'orbitRing', name, dwarf };
+  return mesh;
+}
+
 // ---------- Planets ----------
 const planetMeshes = {};   // name -> { mesh, orbitRadius, period, phase, e, i, moons:[] }
 const planetGroups = {};   // name -> THREE.Group (for moon system)
 const allSelectables = [];
+const orbitRings = [];     // raycastable planet/dwarf orbit rings
 
 function buildPlanets() {
   PLANETS.forEach((p, idx) => {
@@ -174,7 +192,13 @@ function buildPlanets() {
 
     // orbit ring
     const orbitLine = makeOrbitRing(orbitR, p.color, 0.18);
+    orbitLine.userData = { type: 'orbitRing', name: p.name };
+    orbitRings.push(orbitLine);
     scene.add(orbitLine);
+    // wide invisible tap-target ring for mobile
+    const hitRing = makeOrbitHitRing(orbitR, p.name);
+    orbitRings.push(hitRing);
+    scene.add(hitRing);
 
     // group for moon system (positioned at planet's orbital position)
     const grp = new THREE.Group();
@@ -253,7 +277,13 @@ function buildDwarfs() {
     dhalo.scale.setScalar(0.3);
     mesh.add(dhalo);
     const orbitLine = makeOrbitRing(orbitR, d.color, 0.12);
+    orbitLine.userData = { type: 'orbitRing', name: d.name, dwarf: true };
+    orbitRings.push(orbitLine);
     scene.add(orbitLine);
+    // wide invisible tap-target ring for mobile
+    const hitRing = makeOrbitHitRing(orbitR, d.name, true);
+    orbitRings.push(hitRing);
+    scene.add(hitRing);
     scene.add(mesh);
     dwarfMeshes.push({ mesh, orbitR, period: d.period, e: d.e, i: d.i, phase: Math.random() * Math.PI * 2, name: d.name });
     mesh.userData = { type: 'dwarf', name: d.name };
@@ -316,17 +346,34 @@ function setView(name) {
 const select = document.getElementById('planet-select');
 select.addEventListener('change', () => setView(select.value));
 
+// ---------- Banner tap: cycle to the next planet ----------
+// Build an ordered cycle list (system, then planets, then dwarf planets).
+const cycleOrder = ['system', ...PLANETS.map(p => p.name), ...DWARF_PLANETS.map(d => d.name)];
+const titleEl = document.getElementById('title');
+titleEl.addEventListener('click', () => {
+  const cur = select.value;
+  const idx = cycleOrder.indexOf(cur);
+  const next = cycleOrder[(idx + 1) % cycleOrder.length];
+  select.value = next;
+  setView(next);
+});
+
 // ---------- Raycaster for selection ----------
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const infoEl = document.getElementById('info');
+const focusBtn = document.getElementById('focus-btn');
 let pointerDownPos = null;
+let focusTarget = null; // name of the planet the focus button is for
+let ignoreNextPointer = false;
 
 // Track pointer-down so we can distinguish a tap from a drag (mobile).
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.target === focusBtn) { ignoreNextPointer = true; return; }
   pointerDownPos = { x: e.clientX, y: e.clientY };
 });
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.target === focusBtn || ignoreNextPointer) { ignoreNextPointer = false; return; }
   // Only treat as a tap if the pointer barely moved (not a drag/orbit).
   if (pointerDownPos) {
     const dx = e.clientX - pointerDownPos.x;
@@ -336,6 +383,23 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   pointerDownPos = null;
   handleSelect(e.clientX, e.clientY);
 });
+
+// Focus button: follow the planet close-up
+focusBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (focusTarget) {
+    setView(focusTarget);
+    select.value = focusTarget;
+    focusBtn.classList.add('hidden');
+    focusTarget = null;
+  }
+});
+
+function showFocusButton(name) {
+  focusTarget = name;
+  focusBtn.textContent = 'Focus \u2192 ' + name;
+  focusBtn.classList.remove('hidden');
+}
 
 function handleSelect(clientX, clientY) {
   mouse.x = (clientX / window.innerWidth) * 2 - 1;
@@ -349,26 +413,49 @@ function handleSelect(clientX, clientY) {
       const d = obj.userData;
       if (d.type === 'planet') {
         const rec = d.rec;
+        focusBtn.classList.add('hidden');
         infoEl.innerHTML = `<h3 style="color:#5fd9ff;font-size:11px;letter-spacing:2px;margin-bottom:6px;text-shadow:0 0 12px #5fd9ff">PLANET</h3>
           <div style="color:#eaf7ff;font-weight:600;font-size:14px;margin-bottom:6px">${rec.name}</div>
           <div><span style="color:#7fa3c4">Orbit</span> ${rec.orbitR.toFixed(1)} AU</div>
           <div><span style="color:#7fa3c4">Period</span> ${rec.period.toFixed(1)} days</div>
           <div><span style="color:#7fa3c4">Radius</span> ${rec.radiusKm.toLocaleString()} km</div>
           <div><span style="color:#7fa3c4">Moons</span> ${rec.moons.length}</div>
-          <div style="margin-top:6px;color:#a8c4e0;font-size:11px">${rec.info}</div>`;
+          <div style="margin-top:6px;color:#a8c4e0;font-size:11px">${rec.info}</div>
+          <div style="margin-top:10px"><button class="mini-btn">Focus \u2192 ${rec.name}</button></div>`;
+        infoEl.style.display = 'block';
+        const mini = infoEl.querySelector('.mini-btn');
+        if (mini) mini.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          setView(rec.name); select.value = rec.name; infoEl.style.display = 'none';
+        });
       } else if (d.type === 'moon') {
+        focusBtn.classList.add('hidden');
         infoEl.innerHTML = `<h3 style="color:#c9a0ff;font-size:11px;letter-spacing:2px;margin-bottom:6px;text-shadow:0 0 12px #c9a0ff">MOON</h3>
           <div style="color:#eaf7ff;font-weight:600;font-size:14px;margin-bottom:6px">${d.name}</div>
           <div><span style="color:#7fa3c4">Of</span> ${d.planet}</div>`;
+        infoEl.style.display = 'block';
       } else if (d.type === 'dwarf') {
+        focusBtn.classList.add('hidden');
         infoEl.innerHTML = `<h3 style="color:#c8a878;font-size:11px;letter-spacing:2px;margin-bottom:6px">DWARF PLANET</h3>
           <div style="color:#eaf7ff;font-weight:600;font-size:14px;margin-bottom:6px">${d.name}</div>`;
+        infoEl.style.display = 'block';
       }
-      infoEl.style.display = 'block';
+      return;
     }
-  } else {
-    infoEl.style.display = 'none';
   }
+
+  // No body hit — check orbit rings (so tapping a ring focuses its planet)
+  const ringHits = raycaster.intersectObjects(orbitRings, false);
+  if (ringHits.length && ringHits[0].object.userData.name) {
+    const ring = ringHits[0].object.userData;
+    infoEl.style.display = 'none';
+    showFocusButton(ring.name);
+    return;
+  }
+
+  // Empty space — hide both
+  infoEl.style.display = 'none';
+  focusBtn.classList.add('hidden');
 }
 
 // ---------- Animation ----------
